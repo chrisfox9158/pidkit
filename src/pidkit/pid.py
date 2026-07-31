@@ -1,7 +1,7 @@
 import time
 
 class PID:
-    """PID controller for closed-loop error correction.
+    """Simple PID controller for closed-loop error correction.
 
     Computes a correction signal from the difference between a setpoint
     and a measured value. Uses Proportional, Integral, Derivative control strategy.
