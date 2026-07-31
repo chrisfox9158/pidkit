@@ -21,8 +21,6 @@ pid = PID(kp=1.0, ki=0.1, kd=0.05, setpoint=100)
 # Control step use:
 correction = pid.compute(pv=95, dt=0.1)
 ```
-
-`pv` is the current measured value of the controlled environment variable. 
 `compute()` returns a single correction signal; this signal must be interpreted and used effectively by user implementation.
 
 ## Timing Modes
