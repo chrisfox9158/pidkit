@@ -12,3 +12,8 @@ dependencies = []
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pidkit"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]
