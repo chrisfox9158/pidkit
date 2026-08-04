@@ -224,6 +224,22 @@ def _find_tolerance_margin(*, times, errors, error_tolerance):
 
 @dataclass
 class TuneResult:
+    """Result of an autotuning run.
+
+    Attributes:
+        kp: Tuned proportional gain.
+        ki: Tuned integral gain.
+        kd: Tuned derivative gain.
+        times: Timestamps from the final trial, in seconds.
+        errors: setpoint-pv difference error at each timestep of the final trial.
+        pv_values: Process variable at each timestep of the final trial.
+        control_outputs: PID control output at each timestep of the final trial.
+        peak_overshoot: Largest error magnitude reached after crossing setpoint, if any.
+        zero_crossings: Number of times the error changed sign during the final trial.
+        score: Final ITAE cost of the tuned gains.
+        stop_time: Time at which error settled within tolerance, or None if the system did not settle.
+        steady_error: Average error over the settled region, or None if the system did not settle.
+    """
     kp: float
     ki: float
     kd: float
@@ -248,6 +264,55 @@ def autotune_sim(*, plant_factory, setpoint, dt, steps,
                 stop_tolerance=1e-3,
                 error_tolerance=0.02,
                 start_candidate=1e-6):
+    """Automatically tune PID gain values for any
+    simulated plant with a constant timestep.
+
+    Searches for kp, ki, and kd in sequence: kp is found
+    via exponential search biased toward stability
+    (minimal overshoot / oscillation behavior),
+    and subsequently bisected for refinement.
+    ki and kd depend on exponential search biased toward
+    a point where time-weighted error (ITAE) is minimized,
+    then refined via golden-section search. Each stage holds
+    previous gains as a fixed value.
+
+    The plant is not touched directly; the system depends on
+    a user-supplied factory which provides per-trial instances
+    in order to avoid cross-trial data leaks.
+
+    Example:
+        >>> result = autotune_sim(plant_factory=lambda: Thermostat(control_scale=1.0, response_scale=60.0), setpoint=25.0, dt=0.1, steps=600)
+        >>> pid = PID(kp=result.kp, ki=result.ki, kd=result.kd, setpoint=25.0)
+
+    Args:
+        plant_factory: Zero-argument callable returning a fresh plant
+            instance. The plant must implement step(u, dt) -> new_state
+            and get_state() -> float.
+        setpoint: Target value to tune toward.
+        dt: Fixed timestep used for every simulated trial.
+        steps: Number of timesteps to simulate per trial.
+        output_limits: Optional (min, max) tuple bounding the PID's
+            control output during tuning. Either side may be None for
+            unbounded; defaults to fully unbounded.
+        crossing_threshold: Number of error sign-changes, indicating oscillation,
+            in a trial's trace during the kp search.
+        overshoot_threshold: Ratio of peak overshoot to initial error
+            that counts as excessive during the kp search.
+        doubling_cap: Maximum exponential-search iterations per stage
+            before raising, if no boundary/minimum is found.
+        refinement_cap: Maximum refinement iterations (bisection or
+            golden-section) per stage.
+        stop_tolerance: Relative bracket-width tolerance that stops
+            refinement early, once reached.
+        error_tolerance: Fraction of initial error used to define the
+            settling band for stop_time/steady_error metrics.
+        start_candidate: Starting value for each stage's exponential
+            search. Should be small relative to any expected gain scale.
+
+    Returns:
+        TuneResult: Dataclass with the tuned gains, the full final trial trace,
+            and diagnostic metrics. See TuneResult for field details.
+    """
 
     kp = _find_kp(plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits,
             crossing_threshold=crossing_threshold, overshoot_threshold=overshoot_threshold,
