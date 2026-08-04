@@ -18,7 +18,7 @@ class PID:
         output_limits: Optional (min, max) tuple for output bounding. Either side may be None for unbounded; defaults to fully unbounded.
     """
 
-    def __init__(self, kp, ki, kd, setpoint, output_limits=(None, None)):
+    def __init__(self, *, kp, ki, kd, setpoint, output_limits=(None, None)):
         self.kp, self.ki, self.kd = kp, ki, kd
         self.setpoint = setpoint
 
@@ -30,7 +30,7 @@ class PID:
         self._prev_error = None
         self._last_call_time = None
 
-    def compute(self, pv, dt=None):
+    def compute(self, *, pv, dt=None):
         """Compute the correction signal for one control step via PID.
 
         Args:
