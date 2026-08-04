@@ -140,3 +140,48 @@ def _find_ki(*, plant_factory, kp, setpoint, dt, steps, output_limits,
     mid = (high + low) / 2
     return mid
 
+def _find_kd(*, plant_factory, kp, ki, setpoint, dt, steps, output_limits,
+            doubling_cap, refinement_cap, tolerance):
+
+    # Candidate bracket discovery
+    def _cost(kd):
+        times, errors = _run_trial(plant_factory=plant_factory, kp=kp, ki=ki, kd=kd, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
+        return _itae(times, errors, dt)
+
+    prev_kd = 1e-6
+    prev_cost = _cost(prev_kd)
+    kd = prev_kd * 2
+
+    bracketed = False
+    for i in range(doubling_cap):
+        cost = _cost(kd)
+        if cost >= prev_cost:
+            bracketed = True
+            break
+        prev_kd, prev_cost = kd, cost
+        kd *= 2
+    if not bracketed:
+        raise RuntimeError("kd search exceeded doubling_cap without finding cost minimum. Please increase doubling_cap")
+
+    # Golden-section refinement
+    low = prev_kd
+    high = kd
+
+    phi = (1 + 5 ** 0.5) / 2 # golden ratio, approx. 1.618
+    phi_complement = (1 / phi) ** 2
+
+    for i in range(refinement_cap):
+        test1 = low + phi_complement * (high - low)
+        test2 = high - phi_complement * (high - low)
+        cost1, cost2 = _cost(test1), _cost(test2)
+
+        if cost1 >= cost2:
+            low = test1
+        elif cost1 < cost2:
+            high = test2
+
+        if (high - low) / (low + math.ulp(0.0)) < tolerance:
+            break
+
+    mid = (high + low) / 2
+    return mid
