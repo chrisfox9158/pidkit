@@ -63,10 +63,11 @@ def _check_reject(errors, crossing_threshold=2, overshoot_threshold=0.5):
     overshoot_ratio = _max_overshoot_ratio(errors)
     return crossings >= crossing_threshold or overshoot_ratio >= overshoot_threshold
 
-def _find_kp(plant_factory, setpoint, dt, steps, output_limits,
+def _find_kp(*, plant_factory, setpoint, dt, steps, output_limits,
             crossing_threshold, overshoot_threshold,
-            doubling_cap, halving_cap, tolerance):
-    
+            doubling_cap, refinement_cap, tolerance):
+
+    # Doubling phase for bracket discovery
     candidate = 1e-6
     low = 0
     high = float('inf')
@@ -80,7 +81,8 @@ def _find_kp(plant_factory, setpoint, dt, steps, output_limits,
     if high == float('inf'):
         raise RuntimeError("kp search exceeded doubling_cap without finding unstable boundary. Please increase doubling_cap")
 
-    for i in range(halving_cap):
+    # Halving phase for refinement
+    for i in range(refinement_cap):
         mid = (low + high) / 2
         trace_times, trace_errors = _run_trial(kp=mid, ki=0, kd=0, plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
         if _check_reject(trace_errors, crossing_threshold, overshoot_threshold):
@@ -91,4 +93,50 @@ def _find_kp(plant_factory, setpoint, dt, steps, output_limits,
             break
 
     return low
+
+def _find_ki(*, plant_factory, kp, setpoint, dt, steps, output_limits,
+            doubling_cap, refinement_cap, tolerance):
+
+    # Candidate bracket discovery
+    def _cost(ki):
+        times, errors = _run_trial(plant_factory=plant_factory, kp=kp, ki=ki, kd=0, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
+        return _itae(times, errors, dt)
+
+    prev_ki = 1e-6
+    prev_cost = _cost(prev_ki)
+    ki = prev_ki * 2
+
+    bracketed = False
+    for i in range(doubling_cap):
+        cost = _cost(ki)
+        if cost >= prev_cost:
+            bracketed = True
+            break
+        prev_ki, prev_cost = ki, cost
+        ki *= 2
+    if not bracketed:
+        raise RuntimeError("ki search exceeded doubling_cap without finding cost minimum. Please increase doubling_cap")
+
+    # Golden-section refinement
+    low = prev_ki
+    high = ki
+
+    phi = (1 + 5 ** 0.5) / 2 # golden ratio, approx. 1.618
+    phi_complement = (1 / phi) ** 2
+
+    for i in range(refinement_cap):
+        test1 = low + phi_complement * (high - low)
+        test2 = high - phi_complement * (high - low)
+        cost1, cost2 = _cost(test1), _cost(test2)
+
+        if cost1 >= cost2:
+            low = test1
+        elif cost1 < cost2:
+            high = test2
+
+        if (high - low) / (low + math.ulp(0.0)) < tolerance:
+            break
+
+    mid = (high + low) / 2
+    return mid
 
