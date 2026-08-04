@@ -63,3 +63,32 @@ def _check_reject(errors, crossing_threshold=2, overshoot_threshold=0.5):
     overshoot_ratio = _max_overshoot_ratio(errors)
     return crossings >= crossing_threshold or overshoot_ratio >= overshoot_threshold
 
+def _find_kp(plant_factory, setpoint, dt, steps, output_limits,
+            crossing_threshold, overshoot_threshold,
+            doubling_cap, halving_cap, tolerance):
+    
+    candidate = 1e-6
+    low = 0
+    high = float('inf')
+    for i in range(doubling_cap):
+        trace_times, trace_errors = _run_trial(kp=candidate, ki=0, kd=0, plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
+        if _check_reject(trace_errors, crossing_threshold, overshoot_threshold):
+            high = candidate
+            break
+        low = candidate
+        candidate *= 2
+    if high == float('inf'):
+        raise RuntimeError("kp search exceeded doubling_cap without finding unstable boundary. Please increase doubling_cap")
+
+    for i in range(halving_cap):
+        mid = (low + high) / 2
+        trace_times, trace_errors = _run_trial(kp=mid, ki=0, kd=0, plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
+        if _check_reject(trace_errors, crossing_threshold, overshoot_threshold):
+            high = mid
+        else:
+            low = mid
+        if (high - low) / (low + math.ulp(0.0)) < tolerance:
+            break
+
+    return low
+
