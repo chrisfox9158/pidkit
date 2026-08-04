@@ -21,7 +21,7 @@ def _run_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_limits)
 
     return times, errors
 
-def _itae(times, errors, dt):
+def _itae(*, times, errors, dt):
     """Integral of time-weighted absolute error.
     
     Assumes uniform timestep spacing (constant dt);
@@ -32,7 +32,7 @@ def _itae(times, errors, dt):
     cost = sum(t * abs(error) for t, error in zip(times, errors)) * dt
     return cost
 
-def _count_zero_crossings(errors):
+def _count_zero_crossings(*, errors):
     def _check_cross(num1, num2):
         if (num1 > 0 and num2 < 0) or (num1 < 0 and num2 > 0):
             return True
@@ -45,7 +45,7 @@ def _count_zero_crossings(errors):
 
     return count
 
-def _max_overshoot_ratio(errors):
+def _max_overshoot_ratio(*, errors):
     initial = errors[0]
     initial_sign = initial > 0
 
@@ -54,27 +54,28 @@ def _max_overshoot_ratio(errors):
         if (error > 0) != initial_sign and error != 0
         ]
     if not overshoot_errors:
-        return 0.0
+        return 0.0, 0.0
 
-    peak = max(abs(error) for error in overshoot_errors)
-    return peak / abs(initial)
+    peak_error = max(abs(error) for error in overshoot_errors)
+    error_ratio = peak_error / abs(initial)
+    return error_ratio, peak_error
 
-def _check_reject(errors, crossing_threshold=2, overshoot_threshold=0.5):
-    crossings = _count_zero_crossings(errors)
-    overshoot_ratio = _max_overshoot_ratio(errors)
+def _check_reject(*, errors, crossing_threshold=2, overshoot_threshold=0.5):
+    crossings = _count_zero_crossings(errors=errors)
+    overshoot_ratio, peak_error = _max_overshoot_ratio(errors=errors)
     return crossings >= crossing_threshold or overshoot_ratio >= overshoot_threshold
 
 def _find_kp(*, plant_factory, setpoint, dt, steps, output_limits,
             crossing_threshold, overshoot_threshold,
-            doubling_cap, refinement_cap, tolerance):
+            doubling_cap, refinement_cap, stop_tolerance, start_candidate):
 
     # Doubling phase for bracket discovery
-    candidate = 1e-6
+    candidate = start_candidate
     low = 0
     high = float('inf')
     for i in range(doubling_cap):
         trace_times, trace_errors = _run_trial(kp=candidate, ki=0, kd=0, plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
-        if _check_reject(trace_errors, crossing_threshold, overshoot_threshold):
+        if _check_reject(errors=trace_errors,crossing_threshold=crossing_threshold, overshoot_threshold=overshoot_threshold):
             high = candidate
             break
         low = candidate
@@ -86,24 +87,24 @@ def _find_kp(*, plant_factory, setpoint, dt, steps, output_limits,
     for i in range(refinement_cap):
         mid = (low + high) / 2
         trace_times, trace_errors = _run_trial(kp=mid, ki=0, kd=0, plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
-        if _check_reject(trace_errors, crossing_threshold, overshoot_threshold):
+        if _check_reject(errors=trace_errors, crossing_threshold=crossing_threshold, overshoot_threshold=overshoot_threshold):
             high = mid
         else:
             low = mid
-        if (high - low) / (low + math.ulp(0.0)) < tolerance:
+        if (high - low) / (low + math.ulp(0.0)) < stop_tolerance:
             break
 
     return low
 
 def _find_ki(*, plant_factory, kp, setpoint, dt, steps, output_limits,
-            doubling_cap, refinement_cap, tolerance):
+            doubling_cap, refinement_cap, stop_tolerance, start_candidate):
 
     # Candidate bracket discovery
     def _cost(ki):
         times, errors = _run_trial(plant_factory=plant_factory, kp=kp, ki=ki, kd=0, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
-        return _itae(times, errors, dt)
+        return _itae(times=times, errors=errors, dt=dt)
 
-    prev_ki = 1e-6
+    prev_ki = start_candidate
     prev_cost = _cost(prev_ki)
     ki = prev_ki * 2
 
@@ -135,21 +136,21 @@ def _find_ki(*, plant_factory, kp, setpoint, dt, steps, output_limits,
         elif cost1 < cost2:
             high = test2
 
-        if (high - low) / (low + math.ulp(0.0)) < tolerance:
+        if (high - low) / (low + math.ulp(0.0)) < stop_tolerance:
             break
 
     mid = (high + low) / 2
     return mid
 
 def _find_kd(*, plant_factory, kp, ki, setpoint, dt, steps, output_limits,
-            doubling_cap, refinement_cap, tolerance):
+            doubling_cap, refinement_cap, stop_tolerance, start_candidate):
 
     # Candidate bracket discovery
     def _cost(kd):
         times, errors = _run_trial(plant_factory=plant_factory, kp=kp, ki=ki, kd=kd, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
-        return _itae(times, errors, dt)
+        return _itae(times=times, errors=errors, dt=dt)
 
-    prev_kd = 1e-6
+    prev_kd = start_candidate
     prev_cost = _cost(prev_kd)
     kd = prev_kd * 2
 
@@ -181,7 +182,7 @@ def _find_kd(*, plant_factory, kp, ki, setpoint, dt, steps, output_limits,
         elif cost1 < cost2:
             high = test2
 
-        if (high - low) / (low + math.ulp(0.0)) < tolerance:
+        if (high - low) / (low + math.ulp(0.0)) < stop_tolerance:
             break
 
     mid = (high + low) / 2
@@ -209,8 +210,8 @@ def _run_final_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_l
 
     return times, errors, pv_values, control_outputs
 
-def _find_tolerance_margin(times, errors, tolerance_scale):
-    tolerance = tolerance_scale * abs(errors[0])
+def _find_tolerance_margin(*, times, errors, error_tolerance):
+    tolerance = error_tolerance * abs(errors[0])
     stop_time, steady_error = None, None
 
     for i, error in reversed(list(enumerate(errors))):
@@ -235,6 +236,49 @@ class TuneResult:
     peak_overshoot: float
     zero_crossings: int
     score: float
-    stop_time: float
-    steady_error: float
+    stop_time: float | None
+    steady_error: float | None
 
+def autotune_sim(*, plant_factory, setpoint, dt, steps,
+                output_limits=(None, None), 
+                crossing_threshold=2,
+                overshoot_threshold=0.5,
+                doubling_cap=50,
+                refinement_cap=100,
+                stop_tolerance=1e-3,
+                error_tolerance=0.02,
+                start_candidate=1e-6):
+
+    kp = _find_kp(plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits,
+            crossing_threshold=crossing_threshold, overshoot_threshold=overshoot_threshold,
+            doubling_cap=doubling_cap, refinement_cap=refinement_cap, stop_tolerance=stop_tolerance, start_candidate=start_candidate)
+    
+    ki = _find_ki(plant_factory=plant_factory, kp=kp, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits,
+            doubling_cap=doubling_cap, refinement_cap=refinement_cap, stop_tolerance=stop_tolerance, start_candidate=start_candidate)
+    
+    kd = _find_kd(plant_factory=plant_factory, kp=kp, ki=ki, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits,
+            doubling_cap=doubling_cap, refinement_cap=refinement_cap, stop_tolerance=stop_tolerance, start_candidate=start_candidate)
+
+    times, errors, pv_values, control_outputs = _run_final_trial(plant_factory=plant_factory, kp=kp, ki=ki, kd=kd, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
+
+    overshoot_ratio, peak_overshoot = _max_overshoot_ratio(errors=errors)
+    zero_crossings = _count_zero_crossings(errors=errors)
+    score = _itae(times=times, errors=errors, dt=dt)
+    stop_time, steady_error = _find_tolerance_margin(times=times, errors=errors, error_tolerance=error_tolerance)
+
+    return TuneResult(
+        kp= kp,
+        ki= ki,
+        kd= kd,
+
+        times= times,
+        errors= errors,
+        pv_values= pv_values,
+        control_outputs= control_outputs,
+
+        peak_overshoot= peak_overshoot,
+        zero_crossings= zero_crossings,
+        score= score,
+        stop_time= stop_time,
+        steady_error= steady_error
+    )
