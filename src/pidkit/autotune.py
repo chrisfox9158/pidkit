@@ -185,3 +185,37 @@ def _find_kd(*, plant_factory, kp, ki, setpoint, dt, steps, output_limits,
 
     mid = (high + low) / 2
     return mid
+
+def run_final_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_limits):
+
+    plant = plant_factory()
+    pid = PID(kp=kp, ki=ki, kd=kd, setpoint=setpoint, output_limits=output_limits)
+
+    times, errors, process_variables, control_outputs = [], [], [], []
+    t = 0
+    for step in range(steps):
+        pv = plant.get_state()
+        u = pid.compute(pv=pv, dt=dt)
+        error = setpoint - pv
+        plant.step(u, dt)
+
+        times.append(t)
+        errors.append(error)
+        process_variables.append(pv)
+        control_outputs.append(u)
+
+        t += dt
+
+    return times, errors, process_variables, control_outputs
+
+def find_tolerance_margin(times, errors, tolerance_scale):
+    tolerance = tolerance_scale * abs(errors[0])
+    stop_time, steady_error = None, None
+
+    for i, error in reversed(list(enumerate(errors))):
+        if abs(error) >= tolerance:
+            stop_time = times[i + 1]
+            steady_error = sum(error for error in errors[i + 1:]) / len(errors[i + 1:])
+            break
+
+    return stop_time, steady_error
