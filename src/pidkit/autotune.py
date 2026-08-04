@@ -1,6 +1,24 @@
 import math
+from typing import Protocol
 from dataclasses import dataclass
 from .pid import PID
+
+class SimPlant(Protocol):
+    """The minimal interface autotune_sim (and any plant-driven pidkit
+    tooling) expects from a plant.
+
+    A plant does not need to inherit from this class; any passed model
+    with matching step()/get_state() methods fulfills the expectation.
+
+    Methods:
+        step(u, dt): Advance the plant's internal state forward by one
+            timestep, given a control input u and elapsed time dt.
+            Returns the new state.
+        get_state(): Return the plant's current state.
+    """
+
+    def step(self, u: float, dt: float) -> float: ...
+    def get_state(self) -> float: ...
 
 def _run_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_limits):
     plant = plant_factory()
@@ -347,3 +365,4 @@ def autotune_sim(*, plant_factory, setpoint, dt, steps,
         stop_time= stop_time,
         steady_error= steady_error
     )
+
