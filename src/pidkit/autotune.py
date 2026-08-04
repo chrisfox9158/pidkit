@@ -20,3 +20,14 @@ def _run_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_limits)
 
     return times, errors
 
+def _itae(times, errors, dt):
+    """Integral of time-weighted absolute error.
+    
+    Assumes uniform timestep spacing (constant dt);
+    designed for use with simulation plants where
+    dt is not affected by outside variability (such as
+    relay-based hardware irregularity).
+    """
+    cost = sum(t * abs(error) for t, error in zip(times, errors)) * dt
+    return cost
+
