@@ -1,4 +1,5 @@
 import math
+from dataclasses import dataclass
 from .pid import PID
 
 def _run_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_limits):
@@ -186,12 +187,12 @@ def _find_kd(*, plant_factory, kp, ki, setpoint, dt, steps, output_limits,
     mid = (high + low) / 2
     return mid
 
-def run_final_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_limits):
+def _run_final_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_limits):
 
     plant = plant_factory()
     pid = PID(kp=kp, ki=ki, kd=kd, setpoint=setpoint, output_limits=output_limits)
 
-    times, errors, process_variables, control_outputs = [], [], [], []
+    times, errors, pv_values, control_outputs = [], [], [], []
     t = 0
     for step in range(steps):
         pv = plant.get_state()
@@ -201,14 +202,14 @@ def run_final_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_li
 
         times.append(t)
         errors.append(error)
-        process_variables.append(pv)
+        pv_values.append(pv)
         control_outputs.append(u)
 
         t += dt
 
-    return times, errors, process_variables, control_outputs
+    return times, errors, pv_values, control_outputs
 
-def find_tolerance_margin(times, errors, tolerance_scale):
+def _find_tolerance_margin(times, errors, tolerance_scale):
     tolerance = tolerance_scale * abs(errors[0])
     stop_time, steady_error = None, None
 
@@ -219,3 +220,21 @@ def find_tolerance_margin(times, errors, tolerance_scale):
             break
 
     return stop_time, steady_error
+
+@dataclass
+class TuneResult:
+    kp: float
+    ki: float
+    kd: float
+
+    times: list[float]
+    errors: list[float]
+    pv_values: list[float]
+    control_outputs: list[float]
+
+    peak_overshoot: float
+    zero_crossings: int
+    score: float
+    stop_time: float
+    steady_error: float
+
