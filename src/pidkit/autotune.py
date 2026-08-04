@@ -1,8 +1,9 @@
 import math
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 from dataclasses import dataclass
 from .pid import PID
 
+@runtime_checkable
 class SimPlant(Protocol):
     """The minimal interface autotune_sim (and any plant-driven pidkit
     tooling) expects from a plant.
@@ -304,8 +305,8 @@ def autotune_sim(*, plant_factory, setpoint, dt, steps,
 
     Args:
         plant_factory: Zero-argument callable returning a fresh plant
-            instance. The plant must implement step(u, dt) -> new_state
-            and get_state() -> float.
+            instance. The plant must follow the conventions of the
+            SimPlant protocol.
         setpoint: Target value to tune toward.
         dt: Fixed timestep used for every simulated trial.
         steps: Number of timesteps to simulate per trial.
@@ -331,6 +332,8 @@ def autotune_sim(*, plant_factory, setpoint, dt, steps,
         TuneResult: Dataclass with the tuned gains, the full final trial trace,
             and diagnostic metrics. See TuneResult for field details.
     """
+    if not isinstance(plant_factory(), SimPlant):
+        raise TypeError("plant_factory must return an object matching the SimPlant protocol (step(u, dt) and get_state()).")
 
     kp = _find_kp(plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits,
             crossing_threshold=crossing_threshold, overshoot_threshold=overshoot_threshold,
@@ -365,4 +368,3 @@ def autotune_sim(*, plant_factory, setpoint, dt, steps,
         stop_time= stop_time,
         steady_error= steady_error
     )
-
