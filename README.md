@@ -7,9 +7,9 @@ A minimal, dependency-free PID controller for Python.
 pip install git+https://github.com/chrisfox9158/pidkit.git
 ```
 
-**v0.2.0:**
+**v0.2.1:**
 ```bash
-pip install git+https://github.com/chrisfox9158/pidkit.git@v0.2.0
+pip install git+https://github.com/chrisfox9158/pidkit.git@v0.2.1
 ```
 
 ## Quick usage
