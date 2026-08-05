@@ -341,7 +341,8 @@ def autotune_sim(*, plant_factory, setpoint, dt, steps,
             the discovered stable boundary, and strength of penalty against
             ki/kd for actuator effort. 1 uses the raw boundary kp with
             no effort penalty (fast, enables bang-bang behavior); 0 scales
-            kp toward zero and maximizes the effort penalty (slow, gentle behavior).
+            kp toward gentle behavior to avoid output_limits saturation
+            and greatly increases the effort penalty.
         base_effort_weight: Base weight applied to total actuator effort
             in the ki/kd cost function, scaled by (1 - aggression).
 
@@ -352,11 +353,21 @@ def autotune_sim(*, plant_factory, setpoint, dt, steps,
     if not isinstance(plant_factory(), SimPlant):
         raise TypeError("plant_factory must return an object matching the SimPlant protocol (step(u, dt) and get_state()).")
 
+    initial_state = plant_factory().get_state()
+    initial_error = setpoint - initial_state
+
+    min_output, max_output = output_limits
+    relevant_limit = max_output if initial_error > 0 else min_output
+    if relevant_limit is not None:
+        kp_gentle = abs(relevant_limit) / abs(initial_error)
+    else:
+        kp_gentle = 1 / abs(initial_error)
+
     boundary_kp = _find_kp(plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits,
             crossing_threshold=crossing_threshold, overshoot_threshold=overshoot_threshold,
             doubling_cap=doubling_cap, refinement_cap=refinement_cap, stop_tolerance=stop_tolerance, start_candidate=start_candidate)
 
-    kp = max(boundary_kp * aggression, math.ulp(0.0))
+    kp = (kp_gentle ** (1 - aggression)) * (boundary_kp ** aggression)
     effort_weight = base_effort_weight * (1 - aggression)
 
     ki = _find_ki(plant_factory=plant_factory, kp=kp, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits,
