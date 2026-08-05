@@ -22,6 +22,7 @@ class SimPlant(Protocol):
     def get_state(self) -> float: ...
 
 def _run_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_limits):
+    """Run one simulation trial. Used during search and omits pv_values."""
     plant = plant_factory()
     pid = PID(kp=kp, ki=ki, kd=kd, setpoint=setpoint, output_limits=output_limits)
 
@@ -71,6 +72,7 @@ def _count_zero_crossings(*, errors):
     return count
 
 def _max_overshoot_ratio(*, errors):
+    """Return (overshoot_ratio, peak_error); raw peak error magnitude alongside its ratio to initial error."""
     initial = errors[0]
     initial_sign = initial > 0
 
@@ -82,8 +84,8 @@ def _max_overshoot_ratio(*, errors):
         return 0.0, 0.0
 
     peak_error = max(abs(error) for error in overshoot_errors)
-    error_ratio = peak_error / abs(initial)
-    return error_ratio, peak_error
+    overshoot_ratio = peak_error / abs(initial)
+    return overshoot_ratio, peak_error
 
 def _check_reject(*, errors, crossing_threshold=2, overshoot_threshold=0.5):
     crossings = _count_zero_crossings(errors=errors)
@@ -216,7 +218,7 @@ def _find_kd(*, plant_factory, kp, ki, setpoint, dt, steps, output_limits,
     return mid
 
 def _run_final_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_limits):
-
+    """Run one simulation trial with the full trace, including pv_values. Used once as final trace data collection."""
     plant = plant_factory()
     pid = PID(kp=kp, ki=ki, kd=kd, setpoint=setpoint, output_limits=output_limits)
 
@@ -238,6 +240,7 @@ def _run_final_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_l
     return times, errors, pv_values, control_outputs
 
 def _find_tolerance_margin(*, times, errors, error_tolerance):
+    """Discovers margin where trace settles within given tolerance parameter; returns (None, None) if no margin exists."""
     tolerance = error_tolerance * abs(errors[0])
     stop_time, steady_error = None, None
 
