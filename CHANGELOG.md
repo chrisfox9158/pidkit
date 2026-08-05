@@ -1,6 +1,11 @@
 # Changelog
 All notable changes to pidkit are documented here. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [0.2.1]
+### Fixed
+- **`_find_tolerance_margin`**: fixed an `IndexError` when the last tolerance violation occurred at the final index of the trace. Also fixed a logic gap where a trace that stayed within tolerance for its entire length reported the same `(None, None)` result as a trace that never settled at all.
+- Standardized the divide-by-zero guard to a fixed small epsilon (`1e-12`) instead of `math.ulp(0.0)`, used throughout `autotune.py`'s tolerance checks.
+
 ## [0.2.0]
 ### Added
 - **`autotune_sim`** — automatic PID gain discovery against any simulated plant. Finds `kp`, `ki`, and `kd` in sequence:
