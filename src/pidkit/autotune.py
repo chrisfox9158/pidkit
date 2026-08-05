@@ -1,4 +1,3 @@
-import math
 from typing import Protocol, runtime_checkable
 from dataclasses import dataclass
 from .pid import PID
