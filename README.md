@@ -39,7 +39,7 @@ For full usage details:
 - [Controller](docs/controller.md) — pidkit **essential** use; the `PID` class, timing modes, output limiting
 - [Autotuning](docs/autotuning.md) — `autotune_sim`, the `aggression` parameter, validation results
 
-## What's new
+## What's new?
 ### v0.2.1
 - **Bug fixes** — resolved an `IndexError` and a related logic gap in settling-time detection (`_find_tolerance_margin`).
 
