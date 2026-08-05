@@ -25,7 +25,7 @@ def _run_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_limits)
     plant = plant_factory()
     pid = PID(kp=kp, ki=ki, kd=kd, setpoint=setpoint, output_limits=output_limits)
 
-    times, errors = [], []
+    times, errors, control_outputs = [], [], []
     t = 0
     for step in range(steps):
         pv = plant.get_state()
@@ -35,10 +35,16 @@ def _run_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_limits)
 
         times.append(t)
         errors.append(error)
+        control_outputs.append(u)
 
         t += dt
 
-    return times, errors
+    return times, errors, control_outputs
+
+def _effort_cost(*, control_outputs, dt):
+    """Integral of absolute control output; stand-in for actuator effort."""
+    cost = sum(abs(u) for u in control_outputs) * dt
+    return cost
 
 def _itae(*, times, errors, dt):
     """Integral of time-weighted absolute error.
@@ -93,7 +99,7 @@ def _find_kp(*, plant_factory, setpoint, dt, steps, output_limits,
     low = 0
     high = float('inf')
     for i in range(doubling_cap):
-        trace_times, trace_errors = _run_trial(kp=candidate, ki=0, kd=0, plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
+        trace_times, trace_errors, trace_controls = _run_trial(kp=candidate, ki=0, kd=0, plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
         if _check_reject(errors=trace_errors,crossing_threshold=crossing_threshold, overshoot_threshold=overshoot_threshold):
             high = candidate
             break
@@ -105,7 +111,7 @@ def _find_kp(*, plant_factory, setpoint, dt, steps, output_limits,
     # Halving phase for refinement
     for i in range(refinement_cap):
         mid = (low + high) / 2
-        trace_times, trace_errors = _run_trial(kp=mid, ki=0, kd=0, plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
+        trace_times, trace_errors, trace_controls = _run_trial(kp=mid, ki=0, kd=0, plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
         if _check_reject(errors=trace_errors, crossing_threshold=crossing_threshold, overshoot_threshold=overshoot_threshold):
             high = mid
         else:
@@ -116,12 +122,13 @@ def _find_kp(*, plant_factory, setpoint, dt, steps, output_limits,
     return low
 
 def _find_ki(*, plant_factory, kp, setpoint, dt, steps, output_limits,
-            doubling_cap, refinement_cap, stop_tolerance, start_candidate):
+            doubling_cap, refinement_cap, stop_tolerance, start_candidate,
+            effort_weight):
 
     # Candidate bracket discovery
     def _cost(ki):
-        times, errors = _run_trial(plant_factory=plant_factory, kp=kp, ki=ki, kd=0, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
-        return _itae(times=times, errors=errors, dt=dt)
+        times, errors, control_outputs = _run_trial(plant_factory=plant_factory, kp=kp, ki=ki, kd=0, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
+        return _itae(times=times, errors=errors, dt=dt) + effort_weight * _effort_cost(control_outputs=control_outputs, dt=dt)
 
     prev_ki = start_candidate
     prev_cost = _cost(prev_ki)
@@ -162,12 +169,13 @@ def _find_ki(*, plant_factory, kp, setpoint, dt, steps, output_limits,
     return mid
 
 def _find_kd(*, plant_factory, kp, ki, setpoint, dt, steps, output_limits,
-            doubling_cap, refinement_cap, stop_tolerance, start_candidate):
+            doubling_cap, refinement_cap, stop_tolerance, start_candidate,
+            effort_weight):
 
     # Candidate bracket discovery
     def _cost(kd):
-        times, errors = _run_trial(plant_factory=plant_factory, kp=kp, ki=ki, kd=kd, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
-        return _itae(times=times, errors=errors, dt=dt)
+        times, errors, control_outputs = _run_trial(plant_factory=plant_factory, kp=kp, ki=ki, kd=kd, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
+        return _itae(times=times, errors=errors, dt=dt) + effort_weight * _effort_cost(control_outputs=control_outputs, dt=dt)
 
     prev_kd = start_candidate
     prev_cost = _cost(prev_kd)
@@ -282,7 +290,9 @@ def autotune_sim(*, plant_factory, setpoint, dt, steps,
                 refinement_cap=100,
                 stop_tolerance=1e-3,
                 error_tolerance=0.02,
-                start_candidate=1e-6):
+                start_candidate=1e-6,
+                aggression=0.5,
+                base_effort_weight=0.01):
     """Automatically tune PID gain values for any
     simulated plant with a constant timestep.
 
@@ -327,6 +337,13 @@ def autotune_sim(*, plant_factory, setpoint, dt, steps,
             settling band for stop_time/steady_error metrics.
         start_candidate: Starting value for each stage's exponential
             search. Should be small relative to any expected gain scale.
+        aggression: Value from 0 to 1 controlling how close kp lands to
+            the discovered stable boundary, and strength of penalty against
+            ki/kd for actuator effort. 1 uses the raw boundary kp with
+            no effort penalty (fast, enables bang-bang behavior); 0 scales
+            kp toward zero and maximizes the effort penalty (slow, gentle behavior).
+        base_effort_weight: Base weight applied to total actuator effort
+            in the ki/kd cost function, scaled by (1 - aggression).
 
     Returns:
         TuneResult: Dataclass with the tuned gains, the full final trial trace,
@@ -335,21 +352,26 @@ def autotune_sim(*, plant_factory, setpoint, dt, steps,
     if not isinstance(plant_factory(), SimPlant):
         raise TypeError("plant_factory must return an object matching the SimPlant protocol (step(u, dt) and get_state()).")
 
-    kp = _find_kp(plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits,
+    boundary_kp = _find_kp(plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits,
             crossing_threshold=crossing_threshold, overshoot_threshold=overshoot_threshold,
             doubling_cap=doubling_cap, refinement_cap=refinement_cap, stop_tolerance=stop_tolerance, start_candidate=start_candidate)
-    
+
+    kp = max(boundary_kp * aggression, math.ulp(0.0))
+    effort_weight = base_effort_weight * (1 - aggression)
+
     ki = _find_ki(plant_factory=plant_factory, kp=kp, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits,
-            doubling_cap=doubling_cap, refinement_cap=refinement_cap, stop_tolerance=stop_tolerance, start_candidate=start_candidate)
+            doubling_cap=doubling_cap, refinement_cap=refinement_cap, stop_tolerance=stop_tolerance, start_candidate=start_candidate,
+            effort_weight=effort_weight)
     
     kd = _find_kd(plant_factory=plant_factory, kp=kp, ki=ki, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits,
-            doubling_cap=doubling_cap, refinement_cap=refinement_cap, stop_tolerance=stop_tolerance, start_candidate=start_candidate)
+            doubling_cap=doubling_cap, refinement_cap=refinement_cap, stop_tolerance=stop_tolerance, start_candidate=start_candidate,
+            effort_weight=effort_weight)
 
     times, errors, pv_values, control_outputs = _run_final_trial(plant_factory=plant_factory, kp=kp, ki=ki, kd=kd, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
 
     overshoot_ratio, peak_overshoot = _max_overshoot_ratio(errors=errors)
     zero_crossings = _count_zero_crossings(errors=errors)
-    score = _itae(times=times, errors=errors, dt=dt)
+    score = _itae(times=times, errors=errors, dt=dt) + effort_weight * _effort_cost(control_outputs=control_outputs, dt=dt)
     stop_time, steady_error = _find_tolerance_margin(times=times, errors=errors, error_tolerance=error_tolerance)
 
     return TuneResult(
