@@ -291,8 +291,8 @@ def autotune_sim(*, plant_factory, setpoint, dt, steps,
                 stop_tolerance=1e-3,
                 error_tolerance=0.02,
                 start_candidate=1e-6,
-                aggression=0.5,
-                base_effort_weight=0.01):
+                aggression=0.25,
+                base_effort_weight=0.05):
     """Automatically tune PID gain values for any
     simulated plant with a constant timestep.
 
