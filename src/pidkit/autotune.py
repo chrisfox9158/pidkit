@@ -111,6 +111,7 @@ def _find_kp(*, plant_factory, setpoint, dt, steps, output_limits,
         raise RuntimeError("kp search exceeded doubling_cap without finding unstable boundary. Please increase doubling_cap")
 
     # Halving phase for refinement
+    small_eps = 1e-12
     for i in range(refinement_cap):
         mid = (low + high) / 2
         trace_times, trace_errors, trace_controls = _run_trial(kp=mid, ki=0, kd=0, plant_factory=plant_factory, setpoint=setpoint, dt=dt, steps=steps, output_limits=output_limits)
@@ -118,7 +119,7 @@ def _find_kp(*, plant_factory, setpoint, dt, steps, output_limits,
             high = mid
         else:
             low = mid
-        if (high - low) / (low + math.ulp(0.0)) < stop_tolerance:
+        if (high - low) / (abs(low) + small_eps) < stop_tolerance:
             break
 
     return low
@@ -154,6 +155,7 @@ def _find_ki(*, plant_factory, kp, setpoint, dt, steps, output_limits,
     phi = (1 + 5 ** 0.5) / 2 # golden ratio, approx. 1.618
     phi_complement = (1 / phi) ** 2
 
+    small_eps = 1e-12
     for i in range(refinement_cap):
         test1 = low + phi_complement * (high - low)
         test2 = high - phi_complement * (high - low)
@@ -164,7 +166,7 @@ def _find_ki(*, plant_factory, kp, setpoint, dt, steps, output_limits,
         elif cost1 < cost2:
             high = test2
 
-        if (high - low) / (low + math.ulp(0.0)) < stop_tolerance:
+        if (high - low) / (abs(low) + small_eps) < stop_tolerance:
             break
 
     mid = (high + low) / 2
@@ -201,6 +203,7 @@ def _find_kd(*, plant_factory, kp, ki, setpoint, dt, steps, output_limits,
     phi = (1 + 5 ** 0.5) / 2 # golden ratio, approx. 1.618
     phi_complement = (1 / phi) ** 2
 
+    small_eps = 1e-12
     for i in range(refinement_cap):
         test1 = low + phi_complement * (high - low)
         test2 = high - phi_complement * (high - low)
@@ -211,7 +214,7 @@ def _find_kd(*, plant_factory, kp, ki, setpoint, dt, steps, output_limits,
         elif cost1 < cost2:
             high = test2
 
-        if (high - low) / (low + math.ulp(0.0)) < stop_tolerance:
+        if (high - low) / (abs(low) + small_eps) < stop_tolerance:
             break
 
     mid = (high + low) / 2
@@ -241,15 +244,24 @@ def _run_final_trial(*, plant_factory, kp, ki, kd, setpoint, dt, steps, output_l
 
 def _find_tolerance_margin(*, times, errors, error_tolerance):
     """Discovers margin where trace settles within given tolerance parameter; returns (None, None) if no margin exists."""
+    if not errors or not times:
+        return None, None
+
     tolerance = error_tolerance * abs(errors[0])
-    stop_time, steady_error = None, None
 
-    for i, error in reversed(list(enumerate(errors))):
-        if abs(error) >= tolerance:
-            stop_time = times[i + 1]
-            steady_error = sum(error for error in errors[i + 1:]) / len(errors[i + 1:])
-            break
+    n = len(errors)
+    for i in range(n - 1, -1, -1):
+        if abs(errors[i]) >= tolerance:
+            if i + 1 < n:
+                stop_time = times[i + 1]
+                settled = errors[i + 1 :]
+                steady_error = sum(settled) / len(settled)
+                return stop_time, steady_error
+            else:
+                return None, None
 
+    stop_time = times[0]
+    steady_error = sum(errors) / len(errors)
     return stop_time, steady_error
 
 @dataclass
