@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pidkit"
-version = "0.1.0"
-description = "Standalone PID controller package for error correction in simulated systems"
+version = "0.2.0"
+description = "A minimal, dependency-free PID controller for Python."
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = []
