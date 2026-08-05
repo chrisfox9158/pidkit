@@ -39,7 +39,11 @@ For full usage details:
 - [Controller](docs/controller.md) — pidkit **essential** use; the `PID` class, timing modes, output limiting
 - [Autotuning](docs/autotuning.md) — `autotune_sim`, the `aggression` parameter, validation results
 
-## What's new in v0.2.0
+## What's new
+### v0.2.1
+- **Bug fixes** — resolved an `IndexError` and a related logic gap in settling-time detection (`_find_tolerance_margin`).
+
+### v0.2.0
 - **`autotune_sim`** — automatic PID gain discovery against any simulated plant, requiring only a minimal `step`/`get_state` interface (`pidkit.SimPlant`).
 - **`TuneResult`** — structured result object with tuned gains, the full final-trial trace, and diagnostic metrics (settling time, overshoot, oscillation count, final cost).
 - **Keyword-only arguments** on `PID.__init__` and `PID.compute()`, preventing silent transposition of same-typed arguments like `kp`/`ki`.
